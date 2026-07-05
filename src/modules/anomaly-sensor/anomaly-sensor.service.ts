@@ -86,4 +86,60 @@ export class AnomalySensorService {
       this.authFailures.set(email, []);
     }
   }
+
+  /**
+   * Listens to escrow payment initiations and detects unusually large
+   * transactions using the Z-Score statistical method.
+   *
+   * Detection Rule: Fetches the client's historical escrow amounts,
+   * computes the mean and standard deviation, then calculates the
+   * Z-Score for the current transaction. If Z > 2.5 (i.e., the amount
+   * is more than 2.5 standard deviations above the mean), an alert
+   * is triggered as a potential anomaly.
+   *
+   * Requires at least 3 historical transactions to produce a meaningful
+   * statistical baseline.
+   *
+   * @param payload - The escrow initiation event data
+   */
+  @OnEvent('payment.escrow.initiated')
+  async handlePaymentInitiated(payload: EscrowInitiatedPayload): Promise<void> {
+    const { clientId, grossAmount, escrowId } = payload;
+
+    // Fetch historical transactions for this client to compute mean and stddev
+    const history = await this.prisma.escrowTransaction.findMany({
+      where: {
+        freelanceJob: { clientId },
+        id: { not: escrowId },
+      },
+      select: { grossAmount: true },
+    });
+
+    if (history.length < 3) {
+      // Not enough historical data for a meaningful Z-Score calculation
+      return;
+    }
+
+    const amounts = history.map((tx) => tx.grossAmount);
+    const mean = amounts.reduce((a, b) => a + b, 0) / amounts.length;
+    const stdDev =
+      Math.sqrt(
+        amounts.reduce((sq, n) => sq + Math.pow(n - mean, 2), 0) / amounts.length,
+      ) || 1; // Prevent division by zero when all amounts are identical
+
+    const zScore = (grossAmount - mean) / stdDev;
+
+    if (zScore > 2.5) {
+      this.logger.warn(
+        `Payment anomaly detected for client: ${clientId}, Z-Score: ${zScore.toFixed(2)}`,
+      );
+
+      await this.alertingService.dispatchAlert({
+        title: 'Suspicious Payment Transaction',
+        message: `Unusually large transaction initiated by client ${clientId}. Amount: ${grossAmount} ${payload.currency} (Z-Score: ${zScore.toFixed(2)}).`,
+        severity: 'CRITICAL',
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
 }
