@@ -32,6 +32,7 @@ export interface SignupOutcome {
 export interface PendingConfirmationOutcome {
   readonly kind: 'PENDING_CONFIRMATION';
   readonly candidateUserId: string;
+  readonly candidateEmail: string;
   readonly confirmationToken: string;
 }
 
