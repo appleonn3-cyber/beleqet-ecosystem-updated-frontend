@@ -23,8 +23,10 @@ import { ChatModule } from './modules/chat/chat.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { TelegramModule } from './modules/telegram/telegram.module';
 import { ContactModule } from './modules/contact/contact.module';
-import { InterviewPlannerModule } from '@modules/interview-planner/interview-planner.module';
 
+import { InterviewPlannerModule } from '@modules/interview-planner/interview-planner.module';
+import { DbIndexMasterModule } from './modules/db-index-master/db-index-master.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 @Module({
   imports: [
     // ── Configuration (loads .env) ─────────────────────────────────────────
@@ -99,6 +101,8 @@ import { InterviewPlannerModule } from '@modules/interview-planner/interview-pla
     TelegramModule,
     ContactModule,
     InterviewPlannerModule,
+    DbIndexMasterModule,
+    PaymentsModule,
   ],
 })
 export class AppModule {}

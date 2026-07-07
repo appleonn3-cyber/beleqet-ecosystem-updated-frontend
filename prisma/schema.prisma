@@ -50,6 +50,10 @@ model User {
   availabilities UserAvailability[] @relation("UserAvailabilities")
   employerInterviews Interview[] @relation("EmployerInterviews")
   candidateInterviews Interview[] @relation("CandidateInterviews")
+  referralsGiven        Referral[]          @relation("ReferralReferrer")
+  referralsReceived     Referral[]          @relation("ReferralReferred")
+  jobAlerts             JobAlert[]
+  payments              Payment[]
 
   @@map("users")
 }

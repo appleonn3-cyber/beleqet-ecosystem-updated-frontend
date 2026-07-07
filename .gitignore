@@ -3,16 +3,24 @@ node_modules/
 
 # Build output
 dist/
+<<<<<<< HEAD
 coverage/
+=======
+>>>>>>> upstream/main
 
 # Environment files
 .env
 .env.local
+<<<<<<< HEAD
 .env.production
+=======
+.env.*.local
+>>>>>>> upstream/main
 
 # Logs
 *.log
 npm-debug.log*
+<<<<<<< HEAD
 yarn-debug.log*
 yarn-error.log*
 
@@ -27,3 +35,15 @@ yarn-error.log*
 # OS files
 .DS_Store
 Thumbs.db
+=======
+
+# OS
+.DS_Store
+Thumbs.db
+
+# beleqend_jobs.sql 
+beleqend_jobs.sql
+users_export.json
+scripts/
+.agents/
+>>>>>>> upstream/main
