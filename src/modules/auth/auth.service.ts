@@ -79,10 +79,25 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const valid = await bcrypt.compare(password, user.passwordHash);
+    let hashToCompare = user.passwordHash;
+    // WordPress migration support: normalize '$wp$2y$' to standard bcrypt '$2y$'
+    if (hashToCompare.startsWith('$wp$')) {
+      hashToCompare = hashToCompare.replace('$wp$', '$');
+    }
+
+    const valid = await bcrypt.compare(password, hashToCompare);
     if (!valid) {
       this.eventEmitter.emit('auth.login.failed', { email: normalizedEmail, timestamp: new Date().toISOString() });
       throw new UnauthorizedException('Invalid credentials');
+    }
+
+    // Re-hash to standard format automatically on successful login so we migrate away from $wp$ over time
+    if (hashToCompare !== user.passwordHash) {
+      const newHash = await bcrypt.hash(password, 12);
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { passwordHash: newHash }
+      });
     }
 
     this.eventEmitter.emit('auth.login.success', { email: normalizedEmail, timestamp: new Date().toISOString() });

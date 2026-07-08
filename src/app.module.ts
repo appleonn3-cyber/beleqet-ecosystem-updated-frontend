@@ -23,7 +23,12 @@ import { ChatModule } from './modules/chat/chat.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { TelegramModule } from './modules/telegram/telegram.module';
 import { ContactModule } from './modules/contact/contact.module';
+<<<<<<< HEAD
 import { AnomalySensorModule } from './modules/anomaly-sensor/anomaly-sensor.module';
+=======
+import { DbIndexMasterModule } from './modules/db-index-master/db-index-master.module';
+import { PaymentsModule } from './modules/payments/payments.module';
+>>>>>>> upstream/main
 
 @Module({
   imports: [
@@ -99,6 +104,8 @@ import { AnomalySensorModule } from './modules/anomaly-sensor/anomaly-sensor.mod
     TelegramModule,
     ContactModule,
     AnomalySensorModule,
+    DbIndexMasterModule,
+    PaymentsModule,
   ],
 })
 export class AppModule {}
