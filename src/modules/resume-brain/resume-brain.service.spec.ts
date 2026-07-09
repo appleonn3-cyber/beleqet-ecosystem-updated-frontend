@@ -8,6 +8,7 @@ import { ResumeBrainService, UploadedResumeFile } from './resume-brain.service';
 import { DocumentParserService } from './document-parser.service';
 import { AIExtractorService } from './ai-extractor.service';
 import { ResumeValidatorService } from './resume-validator.service';
+import { ProfileMapperService } from './profile-mapper.service';
 import { EMPTY_EXTRACTED_RESUME } from './dto/extracted-resume.dto';
 
 const makeFile = (over: Partial<UploadedResumeFile> = {}): UploadedResumeFile => ({
@@ -23,12 +24,14 @@ describe('ResumeBrainService', () => {
   let parser: { extractText: jest.Mock };
   let aiExtractor: { extract: jest.Mock; providerName: string };
   let validator: { validate: jest.Mock };
+  let mapper: { toUserProfile: jest.Mock };
 
   beforeEach(async () => {
     parser = { extractText: jest.fn() };
     aiExtractor = { extract: jest.fn(), providerName: 'fake' };
     // Default: validator passes its input straight through.
     validator = { validate: jest.fn((x) => x) };
+    mapper = { toUserProfile: jest.fn(() => ({})) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -36,6 +39,7 @@ describe('ResumeBrainService', () => {
         { provide: DocumentParserService, useValue: parser },
         { provide: AIExtractorService, useValue: aiExtractor },
         { provide: ResumeValidatorService, useValue: validator },
+        { provide: ProfileMapperService, useValue: mapper },
       ],
     }).compile();
 
@@ -148,6 +152,8 @@ describe('ResumeBrainService', () => {
       parser.extractText.mockResolvedValue('Jane Doe\nEngineer');
       const profile = { ...EMPTY_EXTRACTED_RESUME, firstName: 'Jane' };
       aiExtractor.extract.mockResolvedValue(profile);
+      const userProfile = { firstName: 'Jane' };
+      mapper.toUserProfile.mockReturnValue(userProfile);
 
       const file = makeFile();
       await expect(service.extractProfile(file)).resolves.toEqual({
@@ -156,10 +162,12 @@ describe('ResumeBrainService', () => {
         size: 1024,
         provider: 'fake',
         profile,
+        userProfile,
       });
       expect(parser.extractText).toHaveBeenCalledWith(file);
       expect(aiExtractor.extract).toHaveBeenCalledWith('Jane Doe\nEngineer');
       expect(validator.validate).toHaveBeenCalledWith(profile);
+      expect(mapper.toUserProfile).toHaveBeenCalledWith(profile);
     });
 
     it('propagates a 400 raised by the validator (untrusted AI output)', async () => {

@@ -12,6 +12,10 @@ import {
 import { DocumentParserService } from './document-parser.service';
 import { AIExtractorService } from './ai-extractor.service';
 import { ResumeValidatorService } from './resume-validator.service';
+import {
+  ProfileMapperService,
+  UserProfileUpdate,
+} from './profile-mapper.service';
 import { ExtractedResume } from './dto/extracted-resume.dto';
 
 /**
@@ -38,11 +42,17 @@ export interface ParsedResume extends UploadMetadata {
   text: string;
 }
 
-/** Upload metadata plus the AI-extracted structured profile (Phase 4). */
+/** Upload metadata plus the AI-extracted structured profile (Phase 4-6). */
 export interface ExtractedResumeResult extends UploadMetadata {
   /** Provider that produced the extraction, e.g. "groq". */
   provider: string;
+  /** Full structured resume — drives the frontend CV-form autofill. */
   profile: ExtractedResume;
+  /**
+   * The same data mapped to the existing UsersService update shape (Phase 6).
+   * The frontend can send this straight to `PATCH /users/profile` on Save.
+   */
+  userProfile: UserProfileUpdate;
 }
 
 /**
@@ -61,6 +71,7 @@ export class ResumeBrainService {
     private readonly documentParser: DocumentParserService,
     private readonly aiExtractor: AIExtractorService,
     private readonly resumeValidator: ResumeValidatorService,
+    private readonly profileMapper: ProfileMapperService,
   ) {}
 
   health() {
@@ -123,7 +134,13 @@ export class ResumeBrainService {
     const { text, ...metadata } = await this.parseResume(file);
     const extracted = await this.aiExtractor.extract(text);
     const profile = this.resumeValidator.validate(extracted);
-    return { ...metadata, provider: this.aiExtractor.providerName, profile };
+    const userProfile = this.profileMapper.toUserProfile(profile);
+    return {
+      ...metadata,
+      provider: this.aiExtractor.providerName,
+      profile,
+      userProfile,
+    };
   }
 
   /**

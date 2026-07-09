@@ -4,6 +4,7 @@ import { ResumeBrainService, UploadedResumeFile } from './resume-brain.service';
 import { DocumentParserService } from './document-parser.service';
 import { AIExtractorService } from './ai-extractor.service';
 import { ResumeValidatorService } from './resume-validator.service';
+import { ProfileMapperService } from './profile-mapper.service';
 import { EMPTY_EXTRACTED_RESUME } from './dto/extracted-resume.dto';
 
 describe('ResumeBrainController', () => {
@@ -11,11 +12,13 @@ describe('ResumeBrainController', () => {
   let parser: { extractText: jest.Mock };
   let aiExtractor: { extract: jest.Mock; providerName: string };
   let validator: { validate: jest.Mock };
+  let mapper: { toUserProfile: jest.Mock };
 
   beforeEach(async () => {
     parser = { extractText: jest.fn() };
     aiExtractor = { extract: jest.fn(), providerName: 'fake' };
     validator = { validate: jest.fn((x) => x) };
+    mapper = { toUserProfile: jest.fn(() => ({})) };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ResumeBrainController],
@@ -24,6 +27,7 @@ describe('ResumeBrainController', () => {
         { provide: DocumentParserService, useValue: parser },
         { provide: AIExtractorService, useValue: aiExtractor },
         { provide: ResumeValidatorService, useValue: validator },
+        { provide: ProfileMapperService, useValue: mapper },
       ],
     }).compile();
 
@@ -83,6 +87,8 @@ describe('ResumeBrainController', () => {
       parser.extractText.mockResolvedValue('Jane Doe\nProduct Manager');
       const profile = { ...EMPTY_EXTRACTED_RESUME, firstName: 'Jane' };
       aiExtractor.extract.mockResolvedValue(profile);
+      const userProfile = { firstName: 'Jane' };
+      mapper.toUserProfile.mockReturnValue(userProfile);
 
       const file: UploadedResumeFile = {
         originalname: 'resume.pdf',
@@ -97,6 +103,7 @@ describe('ResumeBrainController', () => {
         size: 2048,
         provider: 'fake',
         profile,
+        userProfile,
       });
     });
   });
