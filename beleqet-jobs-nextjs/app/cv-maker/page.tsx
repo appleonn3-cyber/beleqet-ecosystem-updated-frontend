@@ -50,6 +50,29 @@ type CvData = {
   education: Education[];
 };
 
+// Shape returned by POST /resume-brain/extract (`profile`). Mirrors the
+// backend ExtractedResume contract so the autofill maps field-for-field.
+type ExtractedProfile = {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  summary: string;
+  headline: string;
+  location: string;
+  skills: string[];
+  languages: string[];
+  certifications: string[];
+  education: { school: string; qualification: string; year: string }[];
+  experience: {
+    role: string;
+    company: string;
+    start: string;
+    end: string;
+    description: string;
+  }[];
+};
+
 const emptyCv: CvData = {
   fullName: "",
   title: "",
@@ -77,17 +100,31 @@ export default function CvMakerPage() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
   const [uploadError, setUploadError] = useState("");
+  // Phase 7 — resume autofill state.
+  const [extracting, setExtracting] = useState(false);
+  const [extractNotice, setExtractNotice] = useState("");
+  const [aiFields, setAiFields] = useState<Set<string>>(new Set());
+  // Phase 8 — explicit "Save to profile" (DB write) state, kept separate from
+  // the CV-draft save so the two intents don't share feedback.
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileSaved, setProfileSaved] = useState(false);
+  const [profileError, setProfileError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!ready) return;
     if (user) {
-      authenticatedFetch(`${API_URL}/users/cv-draft`).then(async (response) => {
-        if (response.ok) {
-          const draft = await response.json();
+      authenticatedFetch(`${API_URL}/users/cv-draft`)
+        .then(async (response) => {
+          if (!response.ok) return;
+          // The endpoint can answer 200 with an empty body when no draft exists
+          // yet — guard so `.json()` never throws on an empty stream.
+          const draft = await response.json().catch(() => null);
           if (draft?.data) setCv(draft.data);
-        }
-      });
+        })
+        .catch(() => {
+          /* Offline / backend down — fall back to whatever is on screen. */
+        });
     } else {
       const draft = localStorage.getItem("beleqet_cv_draft");
       if (draft)
@@ -102,6 +139,17 @@ export default function CvMakerPage() {
   function field<K extends keyof CvData>(key: K, value: CvData[K]) {
     setCv((old) => ({ ...old, [key]: value }));
     setSaved(false);
+    setProfileSaved(false);
+    // Once the user edits an AI-filled field, it's no longer "just AI".
+    clearAiField(key as string);
+  }
+  function clearAiField(key: string) {
+    setAiFields((prev) => {
+      if (!prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
   }
   function updateExperience(id: number, key: keyof Experience, value: string) {
     field(
@@ -119,6 +167,8 @@ export default function CvMakerPage() {
       ),
     );
   }
+  // "Save draft" — persists the full CV blob only (experience, education,
+  // languages, etc.). Does NOT touch the User profile; that's "Save to profile".
   async function saveDraft() {
     if (user) {
       const response = await authenticatedFetch(`${API_URL}/users/cv-draft`, {
@@ -131,6 +181,56 @@ export default function CvMakerPage() {
       localStorage.setItem("beleqet_cv_draft", JSON.stringify(cv));
       setSaved(true);
     }
+  }
+
+  // Phase 8 — "Save to profile": persist the extracted/edited scalar fields to
+  // the real User record through the EXISTING profile endpoint. This is the DB
+  // write the task requires: Resume Brain only prepares data; UsersService writes.
+  async function saveToProfile() {
+    setProfileError("");
+    setProfileSaved(false);
+    if (!user) {
+      setProfileError("Please log in to save your details to your profile.");
+      return;
+    }
+    const payload = buildProfilePayload();
+    if (Object.keys(payload).length === 0) {
+      setProfileError("Nothing to save yet — add your name, title, or skills first.");
+      return;
+    }
+    setSavingProfile(true);
+    try {
+      const response = await authenticatedFetch(`${API_URL}/users/profile`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) throw new Error("save failed");
+      setProfileSaved(true);
+    } catch {
+      setProfileError("Could not save to your profile. Please try again.");
+    } finally {
+      setSavingProfile(false);
+    }
+  }
+
+  // Map the (possibly edited) CV form onto UpdateUserDto. Only non-empty fields
+  // are included so a partial CV never blanks data already on the profile.
+  function buildProfilePayload(): Record<string, unknown> {
+    const [firstName, ...rest] = cv.fullName.trim().split(/\s+/);
+    const skills = cv.skills
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const payload: Record<string, unknown> = {};
+    if (firstName) payload.firstName = firstName;
+    if (rest.length) payload.lastName = rest.join(" ");
+    if (cv.phone.trim()) payload.phone = cv.phone.trim();
+    if (cv.title.trim()) payload.headline = cv.title.trim();
+    if (cv.summary.trim()) payload.bio = cv.summary.trim();
+    if (cv.location.trim()) payload.location = cv.location.trim();
+    if (skills.length) payload.skills = skills;
+    return payload;
   }
   async function generateSummary() {
     setAiLoading(true);
@@ -165,16 +265,119 @@ export default function CvMakerPage() {
       setAiLoading(false);
     }
   }
-  function upload(e: ChangeEvent<HTMLInputElement>) {
+  // Phase 7 — upload a resume, send it to the backend AI extractor, and
+  // autofill the form from the structured JSON it returns.
+  async function upload(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploadError("");
+    setExtractNotice("");
     if (file.size > 5 * 1024 * 1024) {
       setUploadError("Please choose a file smaller than 5 MB.");
       e.target.value = "";
       return;
     }
     setUploadedFile(file.name);
+
+    if (!user) {
+      setUploadError("Please log in to autofill your CV from a resume.");
+      e.target.value = "";
+      return;
+    }
+
+    setExtracting(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      // No Content-Type header — the browser sets the multipart boundary.
+      const response = await authenticatedFetch(
+        `${API_URL}/resume-brain/extract`,
+        { method: "POST", body: form },
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(extractErrorMessage(response.status, data));
+      applyExtractedProfile(data.profile as ExtractedProfile);
+      setExtractNotice(
+        "We filled in what we found from your resume. Please review every field before saving.",
+      );
+    } catch (error) {
+      setUploadError(
+        error instanceof Error ? error.message : "Could not read that resume.",
+      );
+    } finally {
+      setExtracting(false);
+      e.target.value = "";
+    }
+  }
+
+  // Merge the AI's structured profile into the form and remember which fields
+  // it touched so we can highlight them for review.
+  function applyExtractedProfile(profile: ExtractedProfile) {
+    if (!profile) return;
+    const fullName = [profile.firstName, profile.lastName]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    const filled = new Set<string>();
+
+    setCv((old) => {
+      const next: CvData = { ...old };
+      if (fullName) (next.fullName = fullName), filled.add("fullName");
+      if (profile.headline) (next.title = profile.headline), filled.add("title");
+      if (profile.email) (next.email = profile.email), filled.add("email");
+      if (profile.phone) (next.phone = profile.phone), filled.add("phone");
+      if (profile.location)
+        (next.location = profile.location), filled.add("location");
+      if (profile.summary)
+        (next.summary = profile.summary), filled.add("summary");
+      if (profile.skills?.length)
+        (next.skills = profile.skills.join(", ")), filled.add("skills");
+      if (profile.languages?.length)
+        (next.languages = profile.languages.join(", ")), filled.add("languages");
+      if (profile.experience?.length) {
+        next.experience = profile.experience.map((x, i) => ({
+          id: Date.now() + i,
+          role: x.role,
+          company: x.company,
+          start: x.start,
+          end: x.end,
+          description: x.description,
+        }));
+        filled.add("experience");
+      }
+      if (profile.education?.length) {
+        next.education = profile.education.map((x, i) => ({
+          id: Date.now() + 1000 + i,
+          school: x.school,
+          qualification: x.qualification,
+          year: x.year,
+        }));
+        filled.add("education");
+      }
+      return next;
+    });
+
+    setAiFields(filled);
+    setSaved(false);
+  }
+
+  function extractErrorMessage(status: number, data: { message?: string }): string {
+    switch (status) {
+      case 400:
+        return "That file didn't look like a resume. Please try another file.";
+      case 413:
+        return "That file is too large (max 5 MB).";
+      case 415:
+        return "Unsupported file type. Please upload a PDF or DOCX.";
+      case 422:
+        return "We couldn't read text from that file. Scanned or image-only resumes aren't supported.";
+      case 429:
+        return "The AI is busy right now. Please try again in a moment.";
+      case 503:
+        return "Resume AI is temporarily unavailable. Please try again later.";
+      default:
+        return data?.message || "Could not read that resume.";
+    }
   }
 
   return (
@@ -208,12 +411,40 @@ export default function CvMakerPage() {
               {saved ? "Draft saved" : "Save draft"}
             </button>
             <button
+              onClick={saveToProfile}
+              disabled={savingProfile}
+              className="inline-flex items-center gap-2 rounded-full border border-white/20 px-5 py-3 text-sm font-bold hover:bg-white/10 disabled:cursor-wait disabled:opacity-70"
+            >
+              {savingProfile ? (
+                <Sparkles className="h-4 w-4 animate-pulse text-[#d8ff3e]" />
+              ) : profileSaved ? (
+                <Check className="h-4 w-4 text-[#d8ff3e]" />
+              ) : (
+                <UserRound className="h-4 w-4" />
+              )}
+              {savingProfile
+                ? "Saving…"
+                : profileSaved
+                  ? "Saved to profile"
+                  : "Save to profile"}
+            </button>
+            <button
               onClick={() => window.print()}
               className="inline-flex items-center gap-2 rounded-full bg-[#d8ff3e] px-5 py-3 text-sm font-extrabold text-primary hover:bg-white"
             >
               <Download className="h-4 w-4" /> Download PDF
             </button>
           </div>
+          {profileError && (
+            <p role="alert" className="mt-3 text-sm font-semibold text-[#ff8a8a]">
+              {profileError}
+            </p>
+          )}
+          {profileSaved && !profileError && (
+            <p className="mt-3 flex items-center gap-2 text-sm font-semibold text-[#d8ff3e]">
+              <Check className="h-4 w-4" /> Your details were saved to your profile.
+            </p>
+          )}
         </div>
       </section>
 
@@ -222,23 +453,40 @@ export default function CvMakerPage() {
           <Section
             icon={UploadCloud}
             title="Upload an existing CV"
-            subtitle="Keep your current file with your profile, then use the builder to improve it."
+            subtitle="Upload a PDF or DOCX and we'll autofill the form below with AI. Review before saving."
           >
             <input
               ref={fileRef}
               type="file"
               accept=".pdf,.doc,.docx"
               onChange={upload}
+              disabled={extracting}
               className="hidden"
             />
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
-              className="flex w-full items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-primary/15 bg-[#f7f5ef] px-5 py-7 text-sm font-bold text-primary transition hover:border-brandGreen hover:bg-brandGreen/5"
+              disabled={extracting}
+              className="flex w-full items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-primary/15 bg-[#f7f5ef] px-5 py-7 text-sm font-bold text-primary transition hover:border-brandGreen hover:bg-brandGreen/5 disabled:cursor-wait disabled:opacity-70"
             >
-              <FileText className="h-6 w-6 text-brandGreen" />
-              {uploadedFile || "Choose PDF, DOC, or DOCX (max 5 MB)"}
+              {extracting ? (
+                <>
+                  <Sparkles className="h-6 w-6 animate-pulse text-brandGreen" />
+                  Reading your resume…
+                </>
+              ) : (
+                <>
+                  <FileText className="h-6 w-6 text-brandGreen" />
+                  {uploadedFile || "Choose PDF or DOCX (max 5 MB)"}
+                </>
+              )}
             </button>
+            {extractNotice && (
+              <p className="mt-3 flex items-start gap-2 rounded-xl bg-brandGreen/10 px-4 py-3 text-sm font-semibold text-brandGreen">
+                <Sparkles className="mt-0.5 h-4 w-4 shrink-0" />
+                {extractNotice}
+              </p>
+            )}
             {uploadError && (
               <p role="alert" className="mt-3 rounded-xl bg-redAccent/10 px-4 py-3 text-sm font-semibold text-redAccent">
                 {uploadError}
@@ -257,12 +505,14 @@ export default function CvMakerPage() {
                 placeholder="e.g. Henok Mekonnen"
                 value={cv.fullName}
                 onChange={(v) => field("fullName", v)}
+                highlighted={aiFields.has("fullName")}
               />
               <Input
                 label="Professional title"
                 placeholder="e.g. Senior Product Designer"
                 value={cv.title}
                 onChange={(v) => field("title", v)}
+                highlighted={aiFields.has("title")}
               />
               <Input
                 label="Email"
@@ -270,18 +520,21 @@ export default function CvMakerPage() {
                 placeholder="you@example.com"
                 value={cv.email}
                 onChange={(v) => field("email", v)}
+                highlighted={aiFields.has("email")}
               />
               <Input
                 label="Phone"
                 placeholder="e.g. +251 911 234 567"
                 value={cv.phone}
                 onChange={(v) => field("phone", v)}
+                highlighted={aiFields.has("phone")}
               />
               <Input
                 label="Location"
                 placeholder="e.g. Addis Ababa, Ethiopia"
                 value={cv.location}
                 onChange={(v) => field("location", v)}
+                highlighted={aiFields.has("location")}
               />
               <Input
                 label="Portfolio or LinkedIn"
@@ -296,12 +549,17 @@ export default function CvMakerPage() {
             icon={FileText}
             title="Professional summary"
             subtitle="Write it yourself or let Groq create a focused draft from your details."
+            highlighted={aiFields.has("summary")}
           >
             <textarea
               rows={5}
               value={cv.summary}
               onChange={(e) => field("summary", e.target.value)}
-              className={inputClass}
+              className={`${inputClass} ${
+                aiFields.has("summary")
+                  ? "border-brandGreen ring-2 ring-brandGreen/20"
+                  : ""
+              }`}
               placeholder="Results-driven professional with experience in…"
             />
             <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -326,6 +584,7 @@ export default function CvMakerPage() {
             icon={Briefcase}
             title="Work experience"
             subtitle="Start with your most recent role."
+            highlighted={aiFields.has("experience")}
           >
             <div className="space-y-5">
               {cv.experience.map((item, index) => (
@@ -414,6 +673,7 @@ export default function CvMakerPage() {
             icon={GraduationCap}
             title="Education"
             subtitle="Add degrees, certificates, or relevant training."
+            highlighted={aiFields.has("education")}
           >
             <div className="space-y-4">
               {cv.education.map((item, index) => (
@@ -473,12 +733,17 @@ export default function CvMakerPage() {
               icon={Award}
               title="Skills"
               subtitle="Separate skills with commas."
+              highlighted={aiFields.has("skills")}
             >
               <textarea
                 rows={4}
                 value={cv.skills}
                 onChange={(e) => field("skills", e.target.value)}
-                className={inputClass}
+                className={`${inputClass} ${
+                  aiFields.has("skills")
+                    ? "border-brandGreen ring-2 ring-brandGreen/20"
+                    : ""
+                }`}
                 placeholder="Project management, Excel, Figma"
               />
             </Section>
@@ -486,12 +751,17 @@ export default function CvMakerPage() {
               icon={Languages}
               title="Languages"
               subtitle="Include proficiency where useful."
+              highlighted={aiFields.has("languages")}
             >
               <textarea
                 rows={4}
                 value={cv.languages}
                 onChange={(e) => field("languages", e.target.value)}
-                className={inputClass}
+                className={`${inputClass} ${
+                  aiFields.has("languages")
+                    ? "border-brandGreen ring-2 ring-brandGreen/20"
+                    : ""
+                }`}
                 placeholder="Amharic — Native, English — Fluent"
               />
             </Section>
@@ -511,11 +781,13 @@ function Section({
   title,
   subtitle,
   children,
+  highlighted = false,
 }: {
   icon: typeof UserRound;
   title: string;
   subtitle: string;
   children: React.ReactNode;
+  highlighted?: boolean;
 }) {
   return (
     <section className="rounded-[24px] border border-primary/10 bg-white p-5 sm:p-6">
@@ -524,7 +796,10 @@ function Section({
           <Icon className="h-5 w-5" />
         </span>
         <div>
-          <h2 className="font-extrabold text-primary">{title}</h2>
+          <h2 className="flex items-center gap-2 font-extrabold text-primary">
+            {title}
+            {highlighted && <AiBadge />}
+          </h2>
           <p className="mt-0.5 text-xs text-muted">{subtitle}</p>
         </div>
       </div>
@@ -538,24 +813,38 @@ function Input({
   onChange,
   type = "text",
   placeholder,
+  highlighted = false,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   type?: string;
   placeholder?: string;
+  highlighted?: boolean;
 }) {
   return (
     <label className="block text-xs font-bold text-ink">
-      {label}
+      <span className="inline-flex items-center gap-1.5">
+        {label}
+        {highlighted && <AiBadge />}
+      </span>
       <input
         type={type}
         placeholder={placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className={inputClass}
+        className={`${inputClass} ${
+          highlighted ? "border-brandGreen ring-2 ring-brandGreen/20" : ""
+        }`}
       />
     </label>
+  );
+}
+function AiBadge() {
+  return (
+    <span className="inline-flex items-center gap-0.5 rounded-full bg-brandGreen/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-brandGreen">
+      <Sparkles className="h-2.5 w-2.5" /> AI
+    </span>
   );
 }
 function AddButton({ label, onClick }: { label: string; onClick: () => void }) {
