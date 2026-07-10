@@ -8,11 +8,11 @@ import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
 export class PresignedUrlDto {
   @IsString()
   @IsNotEmpty()
-  filename: string;
+  filename!: string; // 💡 Added ! to satisfy strict initializer criteria
 
   @IsString()
   @IsNotEmpty()
-  contentType: string;
+  contentType!: string; // 💡 Added ! to satisfy strict initializer criteria
 
   @IsString()
   @IsOptional()

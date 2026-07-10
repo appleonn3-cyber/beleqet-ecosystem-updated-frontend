@@ -7,7 +7,7 @@ import * as path from 'path';
 
 @Injectable()
 export class UploadsService {
-  private s3Client: S3Client;
+  private s3Client: S3Client | undefined; // 💡 Fixed: Added | undefined to allow safety fallbacks
   private bucket: string;
   private readonly logger = new Logger(UploadsService.name);
 

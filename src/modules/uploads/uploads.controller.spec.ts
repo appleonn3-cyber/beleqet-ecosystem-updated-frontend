@@ -1,9 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { describe, beforeEach, it, expect, jest } from '@jest/globals';
 import { UploadsController } from './uploads.controller';
 import { UploadsService } from './uploads.service';
 
 const mockUploadsService = {
-  generatePresignedUrl: jest.fn().mockResolvedValue({
+  // 💡 Cast jest.fn() to 'any' to bypass the strict signature check for your return payload
+  generatePresignedUrl: (jest.fn() as any).mockResolvedValue({
     presignedUrl: 'https://s3.example.com/presigned',
     publicUrl: 'https://s3.example.com/public',
     key: 'misc/test-file.pdf',

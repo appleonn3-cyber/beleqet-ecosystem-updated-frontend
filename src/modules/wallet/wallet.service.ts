@@ -7,14 +7,14 @@ export class WithdrawDto {
   @IsInt()
   @Min(1, { message: 'Minimum withdrawal is ETB 1' })
   @Max(1_000_000, { message: 'Maximum single withdrawal is ETB 1,000,000' })
-  amount: number;
+  amount!: number;
 
   @IsEnum(['CHAPA', 'TELEBIRR', 'CBE_BIRR'], { message: 'method must be CHAPA, TELEBIRR, or CBE_BIRR' })
-  method: 'CHAPA' | 'TELEBIRR' | 'CBE_BIRR';
+  method!: 'CHAPA' | 'TELEBIRR' | 'CBE_BIRR';
 
   @IsString()
   @MaxLength(50, { message: 'accountRef must be 50 characters or fewer' })
-  accountRef: string;
+  accountRef!: string;
 
   @IsString()
   @IsOptional()
@@ -56,7 +56,6 @@ export class WalletService {
     });
   }
 
-  // Mock exchange rates. In a real scenario, this would call an external API.
   private readonly exchangeRates: Record<string, number> = {
     'USD_ETB': 120.5,
     'EUR_ETB': 130.2,
@@ -76,13 +75,11 @@ export class WalletService {
     const wallet = await this.prisma.freelancerWallet.findUnique({ where: { userId } });
     if (!wallet) throw new NotFoundException('Wallet not found');
 
-    // Convert requested withdrawal amount to the wallet's base currency (ETB)
     const withdrawCurrency = dto.currency || 'ETB';
     const amountInWalletCurrency = this.convertCurrency(dto.amount, withdrawCurrency, wallet.currency);
 
     if (wallet.availableBalance < amountInWalletCurrency) throw new BadRequestException('Insufficient available balance');
 
-    // Step 1: Deduct balance and create a PENDING transaction atomically
     const { tx } = await this.prisma.$transaction(async (prisma: any) => {
       await prisma.freelancerWallet.update({
         where: { userId },
@@ -94,7 +91,6 @@ export class WalletService {
       return { tx };
     });
 
-    // Step 2: Attempt Chapa payout
     const chapaSecret = this.config.get<string>('CHAPA_SECRET_KEY');
     if (chapaSecret) {
       try {
@@ -116,7 +112,6 @@ export class WalletService {
 
         const data = await response.json() as { status: string; message?: string };
         if (data.status !== 'success') {
-          // Step 3 (rollback): Chapa rejected — restore balance
           this.logger.warn(`Chapa payout rejected: ${data.message}. Rolling back balance for user ${userId}`);
           await this.prisma.$transaction([
             this.prisma.freelancerWallet.update({
@@ -132,7 +127,6 @@ export class WalletService {
         }
       } catch (err) {
         if (err instanceof InternalServerErrorException) throw err;
-        // Network error — roll back
         this.logger.error(`Failed to reach Chapa payout: ${(err as Error).message}. Rolling back.`);
         await this.prisma.$transaction([
           this.prisma.freelancerWallet.update({

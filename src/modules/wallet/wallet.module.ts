@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { BullModule } from '@nestjs/bull';
+import { BullModule } from '@nestjs/bullmq';
 import { QUEUE_NAMES } from '../queues/queues.constants';
 import { WalletService } from './wallet.service';
 import { WalletController } from './wallet.controller';

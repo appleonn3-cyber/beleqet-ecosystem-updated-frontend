@@ -5,7 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
-import { BullModule } from '@nestjs/bull';
+import { BullModule } from '@nestjs/bullmq'; 
 import { QUEUE_NAMES } from '../queues/queues.constants';
 
 @Module({
