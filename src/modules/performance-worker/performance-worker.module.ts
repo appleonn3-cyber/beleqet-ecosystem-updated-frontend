@@ -1,29 +1,15 @@
 import { Module } from '@nestjs/common';
-import { BullModule } from '@nestjs/bullmq';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { BullModule } from '@nestjs/bullmq'; // Verified: Using bullmq wrapper
 import { PerformanceWorkerController } from './performance-worker.controller';
 import { PerformanceWorkerService } from './performance-worker.service';
 import { HeavyTaskProcessor } from './processors/heavy-task.processor';
 
 @Module({
   imports: [
- 
-    BullModule.forRootAsync({
-      imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        connection: {
-          host: configService.get<string>('REDIS_HOST', 'localhost'),
-          port: configService.get<number>('REDIS_PORT', 6379),
-        },
-      }),
-      inject: [ConfigService],
-    }),
-
-
+    // ── CRITICAL CHECK: No forRoot or forRootAsync here anymore ──
     BullModule.registerQueue({
       name: 'performance-heavy-tasks',
       defaultJobOptions: {
-
         attempts: 3, 
         backoff: {
           type: 'exponential',

@@ -41,6 +41,9 @@ export class EscrowProcessor extends WorkerHost {
     private readonly config: ConfigService,
     @InjectQueue(QUEUE_NAMES.NOTIFICATIONS)
     private readonly notificationsQueue: Queue,
+    // ── Added: Inject escrowQueue to safely handle self-requeue tasks ──
+    @InjectQueue(QUEUE_NAMES.ESCROW)
+    private readonly escrowQueue: Queue,
   ) {
     super();
   }
@@ -167,7 +170,8 @@ export class EscrowProcessor extends WorkerHost {
     const releaseAt = new Date(job.data.releaseAt);
     if (releaseAt > new Date()) {
       const delayMs = releaseAt.getTime() - Date.now();
-      await this.notificationsQueue.add(ESCROW_JOBS.AUTO_RELEASE, job.data, { delay: delayMs });
+      // ── Fixed: Changed from notificationsQueue back to escrowQueue to avoid disappearing jobs ──
+      await this.escrowQueue.add(ESCROW_JOBS.AUTO_RELEASE, job.data, { delay: delayMs });
       return;
     }
 
@@ -229,24 +233,31 @@ export class EscrowProcessor extends WorkerHost {
 
     const chapaSecret = this.config.get<string>('CHAPA_SECRET_KEY');
     if (chapaSecret) {
-      try {
-        await fetch('https://api.chapa.co/v1/transfers', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${chapaSecret}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            account_name: 'Freelancer',
-            account_number: job.data.accountRef,
-            amount: amount.toString(),
-            currency: 'ETB',
-            reference: `withdrawal-${job.id}`,
-            bank_code: method === 'TELEBIRR' ? '855' : '853d0598-9c01-41ab-ac99-48eab4da1513',
-          }),
-        });
-      } catch (err) {
-        this.logger.error(`Failed to reach Chapa payout queue: ${(err as Error).message}`);
+      // ── Fixed: Validate response object status to maintain data integrity ──
+      const response = await fetch('https://api.chapa.co/v1/transfers', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${chapaSecret}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          account_name: 'Freelancer',
+          account_number: job.data.accountRef,
+          amount: amount.toString(),
+          currency: 'ETB',
+          reference: `withdrawal-${job.id}`,
+          bank_code: method === 'TELEBIRR' ? '855' : '853d0598-9c01-41ab-ac99-48eab4da1513',
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Chapa withdrawal failed with HTTP status ${response.status}: ${errorText}`);
+      }
+
+      const responseData = await response.json();
+      if (responseData.status !== 'success') {
+        throw new Error(`Chapa withdrawal rejected: ${JSON.stringify(responseData)}`);
       }
     }
 
@@ -257,5 +268,11 @@ export class EscrowProcessor extends WorkerHost {
       body: `Your ${method} withdrawal is being processed. Funds typically arrive within 1–2 business days.`,
       metadata: { amount, method },
     });
+  }
+
+  // ── Fixed: Implemented native, idiomatic BullMQ error handling listener event ──
+  @OnWorkerEvent('failed')
+  handleJobFailure(job: BullJob, error: Error) {
+    this.logger.error(`Job ${job?.id} failed with error: ${error.message}`, error.stack);
   }
 }

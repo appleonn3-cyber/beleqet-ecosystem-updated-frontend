@@ -185,6 +185,7 @@ export class EscrowService {
         },
       });
 
+      // ── Explicitly routing to the escrow queue ──
       await this.escrowQueue.add(ESCROW_JOBS.AUTO_RELEASE, {
         milestoneId,
         freelancerId: milestone.contract.freelancerId,
