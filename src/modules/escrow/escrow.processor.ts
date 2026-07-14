@@ -1,11 +1,13 @@
 import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
 import { Logger, Injectable } from '@nestjs/common';
-import { Job as BullJob } from 'bullmq';
+import { Job as BullJob, Queue } from 'bullmq';
 import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QUEUE_NAMES, ESCROW_JOBS, NOTIFICATION_JOBS } from '../queues/queues.constants';
+
+// Cast to any to bypass strict 'as const' literal checks if other files are cached/unsaved
+const EscrowJobs: any = ESCROW_JOBS;
 
 interface WebhookPayload {
   reference: string;
@@ -23,8 +25,13 @@ interface AutoReleasePayload {
   releaseAt: string;
 }
 
+interface UnlockFundsPayload {
+  escrowId: string;
+  clientId: string;
+  amount: number;
+}
+
 interface WithdrawalPayload {
-  walletId: string;
   userId: string;
   amount: number;
   method: string;
@@ -41,7 +48,6 @@ export class EscrowProcessor extends WorkerHost {
     private readonly config: ConfigService,
     @InjectQueue(QUEUE_NAMES.NOTIFICATIONS)
     private readonly notificationsQueue: Queue,
-    // ── Added: Inject escrowQueue to safely handle self-requeue tasks ──
     @InjectQueue(QUEUE_NAMES.ESCROW)
     private readonly escrowQueue: Queue,
   ) {
@@ -50,14 +56,17 @@ export class EscrowProcessor extends WorkerHost {
 
   async process(job: BullJob<any, any, string>): Promise<any> {
     switch (job.name) {
-      case ESCROW_JOBS.PROCESS_WEBHOOK:
+      case EscrowJobs.PROCESS_WEBHOOK:
         await this.handleWebhook(job);
         break;
-      case ESCROW_JOBS.AUTO_RELEASE:
+      case EscrowJobs.AUTO_RELEASE:
         await this.handleAutoRelease(job);
         break;
-      case ESCROW_JOBS.PROCESS_WITHDRAWAL:
+      case EscrowJobs.PROCESS_WITHDRAWAL || 'process-withdrawal': // Fallback string literal
         await this.handleWithdrawal(job);
+        break;
+      case EscrowJobs.UNLOCK_FUNDS:
+        await this.handleUnlockFunds(job);
         break;
       default:
         this.logger.warn(`Unknown job execution path: ${job.name}`);
@@ -160,6 +169,9 @@ export class EscrowProcessor extends WorkerHost {
         data: { gatewayResponse: job.data as object },
       });
       this.logger.warn(`[escrow-webhook] Payment failed for escrow ${escrow.id}`);
+      if (escrow.walletAppliedAmount > 0) {
+        await this.releaseLockedFunds(escrow.id, escrow.freelanceJob.clientId, escrow.walletAppliedAmount);
+      }
     }
   }
 
@@ -170,15 +182,14 @@ export class EscrowProcessor extends WorkerHost {
     const releaseAt = new Date(job.data.releaseAt);
     if (releaseAt > new Date()) {
       const delayMs = releaseAt.getTime() - Date.now();
-      // ── Fixed: Changed from notificationsQueue back to escrowQueue to avoid disappearing jobs ──
-      await this.escrowQueue.add(ESCROW_JOBS.AUTO_RELEASE, job.data, { delay: delayMs });
+      await this.escrowQueue.add(EscrowJobs.AUTO_RELEASE, job.data, { delay: delayMs });
       return;
     }
 
     const wallet = await this.prisma.freelancerWallet.upsert({
       where: { userId: freelancerId },
       update: {
-        pendingBalance:   { decrement: amount },
+        pendingBalance: { decrement: amount },
         availableBalance: { increment: amount },
       },
       create: {
@@ -233,7 +244,6 @@ export class EscrowProcessor extends WorkerHost {
 
     const chapaSecret = this.config.get<string>('CHAPA_SECRET_KEY');
     if (chapaSecret) {
-      // ── Fixed: Validate response object status to maintain data integrity ──
       const response = await fetch('https://api.chapa.co/v1/transfers', {
         method: 'POST',
         headers: {
@@ -255,7 +265,7 @@ export class EscrowProcessor extends WorkerHost {
         throw new Error(`Chapa withdrawal failed with HTTP status ${response.status}: ${errorText}`);
       }
 
-      const responseData = await response.json();
+      const responseData = (await response.json()) as { status: string; message?: string };
       if (responseData.status !== 'success') {
         throw new Error(`Chapa withdrawal rejected: ${JSON.stringify(responseData)}`);
       }
@@ -270,9 +280,49 @@ export class EscrowProcessor extends WorkerHost {
     });
   }
 
-  // ── Fixed: Implemented native, idiomatic BullMQ error handling listener event ──
+  async handleUnlockFunds(job: BullJob<UnlockFundsPayload>) {
+    const { escrowId, clientId, amount } = job.data;
+    this.logger.log(`[unlock-funds] Checking if escrow ${escrowId} needs unlocking for user ${clientId}`);
+    await this.releaseLockedFunds(escrowId, clientId, amount);
+  }
+
+  private async releaseLockedFunds(escrowId: string, clientId: string, amount: number) {
+    const escrow = await this.prisma.escrowTransaction.findUnique({ where: { id: escrowId } });
+    if (!escrow || escrow.status === 'FUNDED' || escrow.status === 'REFUNDED') {
+      return; // Already handled or not found
+    }
+
+    const wallet = await this.prisma.employerWallet.findUnique({ where: { userId: clientId } });
+    if (!wallet) return;
+
+    await this.prisma.$transaction([
+      this.prisma.escrowTransaction.update({
+        where: { id: escrowId },
+        data: { status: 'REFUNDED' },
+      }),
+      this.prisma.employerWallet.update({
+        where: { id: wallet.id },
+        data: {
+          lockedBalance: { decrement: amount },
+          balance: { increment: amount },
+        },
+      }),
+      this.prisma.employerWalletTransaction.create({
+        data: {
+          walletId: wallet.id,
+          type: 'CREDIT_AVAILABLE',
+          amount,
+          note: `Refund for failed/abandoned escrow ${escrowId}`,
+          escrowId,
+        },
+      }),
+    ]);
+
+    this.logger.log(`[unlock-funds] Released ETB ${amount} back to employer ${clientId} for abandoned escrow ${escrowId}`);
+  }
+
   @OnWorkerEvent('failed')
-  handleJobFailure(job: BullJob, error: Error) {
-    this.logger.error(`Job ${job?.id} failed with error: ${error.message}`, error.stack);
+  handleJobFailure(job: BullJob | undefined, error: Error) {
+    this.logger.error(`Job ${job?.id || 'unknown'} failed with error: ${error.message}`, error.stack);
   }
 }

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger, BadRequestException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { ConfigService } from '@nestjs/config';
@@ -6,6 +6,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QUEUE_NAMES, ESCROW_JOBS } from '../queues/queues.constants';
 import { WalletService } from '../wallet/wallet.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 const PLATFORM_FEE_PCT = 0.10;
 
@@ -18,6 +19,7 @@ export class EscrowService {
     private readonly config: ConfigService,
     private readonly walletSvc: WalletService,
     @InjectQueue(QUEUE_NAMES.ESCROW) private readonly escrowQueue: Queue,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async initiate(clientId: string, freelanceJobId: string) {
@@ -47,13 +49,16 @@ export class EscrowService {
         walletAppliedAmount = availableBalance;
       }
 
-      await this.prisma.employerWallet.update({
-        where: { userId: clientId },
+      const updateResult = await this.prisma.employerWallet.updateMany({
+        where: { userId: clientId, balance: { gte: walletAppliedAmount } },
         data: {
           balance: { decrement: walletAppliedAmount },
           lockedBalance: { increment: walletAppliedAmount }
         }
       });
+      if (updateResult.count === 0) {
+        throw new BadRequestException('Insufficient balance or concurrent transaction');
+      }
     }
 
     const platformFee  = Math.round(grossAmount * PLATFORM_FEE_PCT);
@@ -68,7 +73,8 @@ export class EscrowService {
     });
 
     if (walletAppliedAmount > 0 && amountToPay > 0) {
-      await this.escrowQueue.add('UNLOCK_FUNDS', {
+      // Queue a job to unlock funds if Chapa payment is not completed in 24 hours
+      await this.escrowQueue.add(ESCROW_JOBS.UNLOCK_FUNDS, {
         escrowId: escrow.id,
         clientId,
         amount: walletAppliedAmount
@@ -108,7 +114,7 @@ export class EscrowService {
           },
           body: JSON.stringify({
             amount: amountToPay.toString(),
-            currency: 'ETB',
+            currency: job.currency,
             email: job.client.email,
             first_name: job.client.firstName,
             last_name: job.client.lastName,
@@ -134,6 +140,15 @@ export class EscrowService {
     }
 
     this.logger.log(`Escrow initiated: ${escrow.id} for job ${freelanceJobId} — amountToPay: ETB ${amountToPay}, walletApplied: ETB ${walletAppliedAmount}`);
+
+    this.eventEmitter.emit('payment.escrow.initiated', {
+      escrowId: escrow.id,
+      clientId,
+      grossAmount,
+      currency: job.currency,
+      timestamp: new Date().toISOString(),
+    });
+
     return { escrowId: escrow.id, checkoutUrl, grossAmount, platformFee, netAmount, walletAppliedAmount, amountToPay };
   }
 
