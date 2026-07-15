@@ -78,6 +78,11 @@ jobs:
           LINKEDIN_CLIENT_ID=dummy_linkedin_client_id
           LINKEDIN_CLIENT_SECRET=dummy_linkedin_client_secret
           LINKEDIN_CALLBACK_URL=http://localhost:4000/api/v1/auth/linkedin/callback
+          SMTP_HOST=localhost
+          SMTP_PORT=2525
+          SMTP_USER=dummy_smtp_user
+          SMTP_PASSWORD=dummy_smtp_password
+          SMTP_FROM_ADDRESS=noreply@beleqet.com
           EOF
 
       - run: npx prisma generate
@@ -155,6 +160,11 @@ jobs:
           LINKEDIN_CLIENT_ID=dummy_linkedin_client_id
           LINKEDIN_CLIENT_SECRET=dummy_linkedin_client_secret
           LINKEDIN_CALLBACK_URL=http://localhost:4000/api/v1/auth/linkedin/callback
+          SMTP_HOST=localhost
+          SMTP_PORT=2525
+          SMTP_USER=dummy_smtp_user
+          SMTP_PASSWORD=dummy_smtp_password
+          SMTP_FROM_ADDRESS=noreply@beleqet.com
           EOF
 
       - run: npx prisma generate
