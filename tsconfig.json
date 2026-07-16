@@ -10,7 +10,7 @@
     "jsx": "react-jsx",
     "sourceMap": true,
     "outDir": "./dist",
-    "baseUrl": "./",
+    "baseUrl": "./", 
     "paths": {
       "@common/*": ["src/common/*"],
       "@modules/*": ["src/modules/*"],
@@ -30,4 +30,6 @@
     "beleqet-jobs-nextjs",
     "frontend"
   ]
+}
+  }
 }
