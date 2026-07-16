@@ -10,7 +10,8 @@
     "jsx": "react-jsx",
     "sourceMap": true,
     "outDir": "./dist",
-    "baseUrl": "./", 
+    "baseUrl": "./",
+    "types": ["node", "jest"],
     "paths": {
       "@common/*": ["src/common/*"],
       "@modules/*": ["src/modules/*"],
@@ -23,5 +24,6 @@
     "strictBindCallApply": true,
     "forceConsistentCasingInFileNames": true,
     "noFallthroughCasesInSwitch": true
-  }
+  },
+  "exclude": ["node_modules", "dist", "coverage", "beleqet-jobs-nextjs"]
 }
