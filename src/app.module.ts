@@ -31,7 +31,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { AnomalySensorModule } from './modules/anomaly-sensor/anomaly-sensor.module';
 import { AdminStatsModule } from './modules/admin-stats/admin-stats.module';
 import { DisputeManagerModule } from './modules/dispute-manager/dispute-manager.module';
-import { DbIndexMasterModule } from './modules/db-index-master/db-index-master.module';
+
 import { PaymentsModule } from './modules/payments/payments.module';
 // ── Fixed: PerformanceWorkerModule import statement deleted ──
 import { TwoFactorModule } from './modules/two-factor/two-factor.module';
