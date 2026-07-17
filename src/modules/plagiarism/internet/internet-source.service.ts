@@ -147,7 +147,7 @@ export class InternetSourceService {
     if (ip.startsWith('::ffff:')) {
       ip = ip.substring(7);
     }
- 
+  
     const version = isIP(ip);
     if (version === 4) {
       const [octet1, octet2] = ip.split('.').map(Number);
@@ -155,14 +155,15 @@ export class InternetSourceService {
         octet1 === 10 ||
         (octet1 === 172 && octet2 >= 16 && octet2 <= 31) ||
         (octet1 === 192 && octet2 === 168) ||
+        (octet1 === 169 && octet2 === 254) ||
         octet1 === 127
       );
     }
- 
+  
     if (version === 6) {
       return ip.startsWith('fc') || ip.startsWith('fd') || ip.startsWith('fe80') || ip === '::1';
     }
- 
+  
     return false;
   }
  
