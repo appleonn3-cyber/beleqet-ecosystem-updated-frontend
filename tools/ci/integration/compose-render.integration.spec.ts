@@ -32,6 +32,14 @@ const FULL_ENV = [
   'LINKEDIN_CLIENT_ID=synthetic_linkedin_client_id',
   'LINKEDIN_CLIENT_SECRET=synthetic_linkedin_client_secret',
   'LINKEDIN_CALLBACK_URL=http://localhost:4000/api/v1/auth/linkedin/callback',
+  'SMTP_HOST=localhost',
+  'SMTP_USER=synthetic_smtp_user',
+  'SMTP_PASSWORD=synthetic_smtp_password',
+  'SMTP_FROM_ADDRESS=noreply@example.test',
+  'STRIPE_SECRET_KEY=sk_test_synthetic',
+  'STRIPE_WEBHOOK_SECRET=whsec_synthetic',
+  'PAYPAL_CLIENT_ID=synthetic_paypal_client_id',
+  'PAYPAL_CLIENT_SECRET=synthetic_paypal_client_secret',
 ].join('\n');
 
 const IMAGES_ENV = [
