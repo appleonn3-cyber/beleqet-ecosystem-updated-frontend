@@ -72,7 +72,11 @@ log "rolling containers back to $PREVIOUS_SHA"
   printf 'JOBS_IMAGE=%s/beleqet-jobs-frontend:%s\n' "$IMAGE_NAMESPACE" "$PREVIOUS_SHA"
 } >"$IMAGES_ENV_FILE"
 
-compose up -d --remove-orphans
+# A failed `up` (dependent health gate) must not abort before the explicit
+# health verification below — that check is the authoritative outcome.
+if ! compose up -d --remove-orphans; then
+  log "compose reported unhealthy services during rollback startup — verifying via health check"
+fi
 
 # ── Verify the rolled-back release ───────────────────────────────────────────
 if "$SCRIPT_DIR/health-check.sh" "$HEALTH_URL_BACKEND" "$HEALTH_MAX_ATTEMPTS" "$HEALTH_RETRY_DELAY"; then

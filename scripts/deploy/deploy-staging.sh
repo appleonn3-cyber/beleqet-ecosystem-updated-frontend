@@ -173,8 +173,14 @@ if ! "$SCRIPT_DIR/migrate.sh"; then
 fi
 
 # ── 8. Start the updated services ────────────────────────────────────────────
-compose up -d --remove-orphans
-log "services started for SHA $TARGET_SHA"
+# `up` exits non-zero when a dependent container fails its health gate; the
+# bounded health checks below are the authoritative verdict and drive the
+# rollback path, so a failed `up` must not abort the script here.
+if compose up -d --remove-orphans; then
+  log "services started for SHA $TARGET_SHA"
+else
+  log "compose reported unhealthy services during startup — verifying via health checks"
+fi
 
 # ── 9. Bounded health checks ─────────────────────────────────────────────────
 health_failed=""
