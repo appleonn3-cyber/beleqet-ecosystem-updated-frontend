@@ -22,8 +22,12 @@ trap 'rm -rf "$workdir"' EXIT
 log "rendering docker-compose.yml"
 docker compose -f docker-compose.yml config >/dev/null
 
+# The overlay moves `backend` behind the pre-existing `standalone` profile
+# while `frontend` still depends on it, so the file set only renders with the
+# profile active (pre-existing constraint, documented in docs/CI_CD_AUDIT.md).
 log "rendering docker-compose.yml + load-balancer overlay"
-docker compose -f docker-compose.yml -f docker-compose.load-balancer.yml config >/dev/null
+docker compose -f docker-compose.yml -f docker-compose.load-balancer.yml \
+  --profile standalone config >/dev/null
 
 # ── Staging compose: must render with a complete synthetic environment ───────
 staging_env="$workdir/env.staging"

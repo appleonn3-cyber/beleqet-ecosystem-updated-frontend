@@ -162,7 +162,32 @@ features were added for the sake of the checklist.
   project) and excluded from `tsconfig.build.json` so `nest build` output is
   unchanged.
 
-### 3.9 Existing strengths (preserved)
+### 3.9 Additional defects surfaced by the first real CI run
+
+- **Load-balancer overlay cannot render without its profile**:
+  `docker compose -f docker-compose.yml -f docker-compose.load-balancer.yml config`
+  fails with `service "frontend" depends on undefined service "backend"` —
+  the overlay moves `backend` behind the `standalone` profile while
+  `frontend` still depends on it. Pre-existing defect; CI validates the file
+  set with `--profile standalone` (the only shape that renders) rather than
+  redesigning the overlay, which is out of scope.
+- **`frontend/tsconfig.json` included `e2e/`**, whose Playwright tests import
+  `@playwright/test`/`otplib` from the ROOT package — so a standalone
+  `tsc --noEmit` or Docker build of the admin frontend failed. `e2e` and
+  `playwright.config.ts` are now excluded there (they are executed and
+  type-transpiled from the repository root, which owns those dependencies).
+- **Shell scripts need their executable bit stored in git** (`100755`) —
+  files created on Windows default to `100644`, which made
+  `deploy-staging.sh`'s direct invocation of `migrate.sh` fail with
+  "permission denied" on Linux checkouts (masked locally by Docker Desktop's
+  permissive bind mounts).
+- **Backend lint glob traversal**: `eslint "{src,…,tools}/**/*.ts"` has no
+  literal base directory, so ESLint 8 walks the whole repository and loads
+  `beleqet-jobs-nextjs/.eslintrc.json` (whose `next/core-web-vitals` only
+  resolves inside that package). The script now lists explicit per-directory
+  globs and the root config ignores the frontend trees.
+
+### 3.10 Existing strengths (preserved)
 
 - Working Postgres/Redis service-container pattern and synthetic `.env`
   generation in CI (reused).

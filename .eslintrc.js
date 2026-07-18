@@ -12,7 +12,10 @@ module.exports = {
   ],
   root: true,
   env: { node: true, jest: true },
-  ignorePatterns: ['.eslintrc.js'],
+  // The frontends carry their own ESLint setups (eslint-config-next); keeping
+  // them out of this config's file enumeration prevents ESLint from loading
+  // their configs when it walks the tree from the repository root.
+  ignorePatterns: ['.eslintrc.js', 'frontend/', 'beleqet-jobs-nextjs/', 'dist/', 'coverage/'],
   rules: {
     '@typescript-eslint/interface-name-prefix': 'off',
     '@typescript-eslint/explicit-function-return-type': 'off',
