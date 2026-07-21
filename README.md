@@ -1,4 +1,4 @@
-# Nehmiah Frontend
+# Nehmiah Frontend From Remote
 
 እንኳን ወደ በልቀት (Beleqet) የቴክኖሎጂ ስነ-ምህዳር በደህና መጡ! ይህ መድረክ ከአገር ውስጥ አልፎ ዓለም አቀፍ ደረጃ ያለው የፍሪላንስ ስራዎችን የሚያገናኝ ሱፐር-ፕላትፎርም ነው።
 
